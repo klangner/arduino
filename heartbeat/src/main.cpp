@@ -23,6 +23,8 @@ EthernetUDP Udp;
 EthernetClient c;
 HttpClient http(c, grafanaHostname);
 
+unsigned long currentTime = 0;
+
 // send an NTP request to the time server at the given address
 void sendNTPpacket(const char *address)
 {
@@ -50,14 +52,16 @@ void sendNTPpacket(const char *address)
 // Get current time from NTP server
 unsigned long time()
 {
-
   sendNTPpacket(timeServer); // send an NTP packet to a time server
+  
+  Serial.print("Wait for NTP packet");
 
   // wait to see if a reply is available
-  while (Udp.parsePacket() == 0)
-  {
-    delay(10);
+  while (Udp.parsePacket() == 0){
+    Serial.print(".");
+    delay(100);
   }
+  Serial.println(" Done.");
 
   // We've received a packet, read the data from it
   Udp.read(packetBuffer, NTP_PACKET_SIZE); // read the packet into the buffer
@@ -70,11 +74,10 @@ unsigned long time()
   // combine the four bytes (two words) into a long integer
   // this is NTP time (seconds since Jan 1 1900):
   unsigned long secsSince1900 = highWord << 16 | lowWord;
-  Serial.print("Seconds since Jan 1 1900 = ");
-  Serial.println(secsSince1900);
+  // Serial.print("Seconds since Jan 1 1900 = ");
+  // Serial.println(secsSince1900);
 
   // now convert NTP time into everyday time:
-  Serial.print("Unix time = ");
   // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
   const unsigned long seventyYears = 2208988800UL;
   // subtract seventy years:
@@ -87,7 +90,7 @@ unsigned long time()
 void printTime(unsigned long ts)
 {
   // print the hour, minute and second:
-  Serial.print("The UTC time is ");   // UTC is the time at Greenwich Meridian (GMT)
+  Serial.print("The UTC time is: ");   // UTC is the time at Greenwich Meridian (GMT)
   Serial.print((ts % 86400L) / 3600); // print the hour (86400 equals secs per day)
   Serial.print(':');
   if (((ts % 3600) / 60) < 10)
@@ -107,6 +110,7 @@ void printTime(unsigned long ts)
 
 void sendHeartbeat(unsigned long ts)
 {
+  Serial.print("Send heartbeat: ");
   String payload = String("[{\"name\": \"sandbox.a1.heartbeat\", \"time\":" + String(ts) + ", \"interval\":60, \"value\":1}]");
 
   http.beginRequest();
@@ -119,9 +123,9 @@ void sendHeartbeat(unsigned long ts)
   http.endRequest();
 
   int statusCode = http.responseStatusCode();
-  String response = http.responseBody();
+  // String response = http.responseBody();
 
-  Serial.print("Heartbet Status code: ");
+  Serial.print("Done. Status code: ");
   Serial.println(statusCode);
 }
 
@@ -156,12 +160,19 @@ void setup()
     }
   }
   Udp.begin(localPort);
+  currentTime = time();
 }
 
+unsigned long prevTime = 0;
+
 void loop() {
-  unsigned long ts = time();
-  printTime(ts);
-  sendHeartbeat(ts);
-  delay(60000);
+  // Update time
+  unsigned long loopTime = millis() - prevTime;
+  prevTime = millis();
+  currentTime += loopTime / 1000;
+  printTime(currentTime);
+
+  sendHeartbeat(currentTime);
   Ethernet.maintain();
+  delay(60000 - (millis() - prevTime));
 }
